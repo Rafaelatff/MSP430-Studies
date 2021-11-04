@@ -11,7 +11,7 @@ int x=0;
 void GPIOs_devkit_start(void);
 void SW_read(void);
 void clock_config(void);
-
+void counter_mode(void);
 
 /**
  * main.c
@@ -29,12 +29,72 @@ int main(void)
 	SW_read(); //Testing S1 and S2 of devkit;
 	clock_config();
 
-	
-	while(1){
-	    P5OUT ^= BIT1;
-	}
+	counter_mode();
+
 
 }
+
+        // Timer A0 interrupt service routine
+        #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+        #pragma vector = TIMER0_A0_VECTOR
+        __interrupt void Timer_A (void)
+        #elif defined(__GNUC__)
+        void __attribute__ ((interrupt(TIMER0_A0_VECTOR))) Timer_A (void)
+        #else
+        #error Compiler not supported!
+        #endif
+        {
+            P1OUT ^= BIT0;
+            TA0CCR0 += 30600;                             // Add Offset to TACCR0
+        }
+
+
+
+void counter_mode(void){
+    //Task 1: Toogle pin using Timer_A;
+    //Timer configuration: 16 bits = 65.536 - 1 (0 até 65535/ 0x0 até 0xFFFF)
+    //Timer A Instance 0 (TA0) ->  Compare/Capture Register 0 (CCR0)
+    //1 - To set Enable bit:
+       TA0CCTL0 |= CCIE;
+    //Now the MSP430 will interrupt once the timer reaches TA0CCR0.
+    //2 - Choose value for TA0CCR0:
+       TA0CCR0 = 50000;
+    //3 - Choose clock source for Timer_A0 (MCLK, ) and also choose Continuous Mode:
+    //The default for the SMCLK is the internal DCO which is set to 1 MHz on reset.
+    //SMCLK = 1 MHz, so one timer count is 1/(1 MHz) = 1 us
+    //Since Timer_A is only 16 bits, our max count is 65,535. So, to achieve a >1 second period, we need to to be under 65.535 kHz.
+    //We have two 1-8x dividers available on Timer_A: ID (input divide) and IDEX (input divide extended).
+    //If we divide the SMCLK/8 = 1MHz/8 = 125kHz. We will still need to divide further. If we take the 125 kHz / 2 = 62.5 kHz. Perfect!
+    //Junto com a inicialização do timer, adicionar ID divicer /8 e IDEX divicer /2:
+           //TA0EX0 = TAIDEX_1;                                    // TAIDEX_1 is dividing the clock by 2
+           //TA0CTL |= TASSEL__SMCLK | ID__8 | MC__CONTINUOUS;     // SMCLK/8,  continuous mode
+    //Note: Remember to configure IDEX first, since when we configure ID__8 we also start the timer by putting it in continuous mode
+    //and we don't want to switch the clock source while the timer is running.
+    //de 1Mhz - 1 = 1us, agora temos: 62.5kHz - 1 = 16 us.
+    //Para atingirmos 0.5hz (1s on e 1s off) -> TA0CCR0 = 62500;
+           //TA0CCR0 = 62500;
+           //TA0CTL |= TASSEL__SMCLK | MC__CONTINUOUS; //No dividers in here! Line used for 50 ms;
+    //The default for the ACLK is the internal 32kHz clock.
+    //The timer will interrupt when the Timer_A count TA0R = TA0CCR0 = 50000.
+    //Therefore the timer will interrupt in approximately 50000 * 1us = 50000 us = 50 ms.
+       //Now let`s test using ACLK
+       TA0CTL |= TASSEL__ACLK | MC__CONTINUOUS;
+       //The frequency of ACLK is 32678 Hz, which means that every count of Timer_A will be 1/(32,678 Hz) = 31 us when ACLK is used.
+       TA0CCR0 = 30600;
+    //4 - Enable global interrupts in the MSP430 so that we can perform an action once TA0R = TA0CCR0.
+    //(We also want the CPU to remain in its lower power state while the timer is counting.
+    //This is recommended practice to conserve power.)
+       __bis_SR_register(LPM0_bits | GIE);
+
+    //Copy inside Timer_A
+    //P1OUT ^= BIT0;
+    //TA0CCR0 += 12000; // Add Offset to TACCR0, value should be same as setted before.
+
+}
+
+
+
+
 
 void clock_config(void){
     //With nothing configurated, and toggle command inside while(1) returns a frequency of 75KHz
